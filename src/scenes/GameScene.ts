@@ -105,6 +105,9 @@ export class GameScene extends Phaser.Scene {
     // Setup UI
     this.setupUI()
 
+    // Listen for resize events
+    this.scale.on('resize', this.handleResize, this)
+
     console.log(`World created: ${WORLD_WIDTH}x${WORLD_HEIGHT} tiles`)
   }
 
@@ -177,7 +180,7 @@ export class GameScene extends Phaser.Scene {
         tile.fillPath()
 
         // Set depth for proper rendering order
-        tile.setDepth(calculateDepth(gridY))
+        tile.setDepth(calculateDepth(gridX, gridY))
 
         this.terrainContainer.add(tile)
         this.tiles.push(tile)
@@ -225,7 +228,7 @@ export class GameScene extends Phaser.Scene {
       this.terrainContainer.add(tree)
 
       // Use same depth calculation as tiles, with offset to render above base tile
-      tree.setDepth(calculateDepth(data.gridY) + 50)
+      tree.setDepth(calculateDepth(data.gridX, data.gridY) + 50)
       this.trees.push(tree)
       this.treeMap.set(`${data.gridX},${data.gridY}`, tree)
     }
@@ -245,7 +248,7 @@ export class GameScene extends Phaser.Scene {
       this.terrainContainer.add(rock)
 
       // Use same depth calculation as tiles, with small offset (rocks at ground level)
-      rock.setDepth(calculateDepth(data.gridY) + 10)
+      rock.setDepth(calculateDepth(data.gridX, data.gridY) + 10)
       this.rocks.push(rock)
       this.rockMap.set(`${data.gridX},${data.gridY}`, rock)
     }
@@ -670,7 +673,7 @@ export class GameScene extends Phaser.Scene {
 
     // Add to container for proper depth sorting with trees/rocks
     this.terrainContainer.add(villager)
-    villager.setDepth(calculateDepth(gridY) + 60)
+    villager.setDepth(calculateDepth(gridX, gridY) + 60)
 
     // Find initial target based on type (use local coordinates since villager is in container)
     let targetX = x
@@ -842,8 +845,8 @@ export class GameScene extends Phaser.Scene {
           villager.sprite.y += (dy / distance) * villager.speed
 
           // Update depth based on grid position for proper sorting with trees/rocks
-          const { gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
-          villager.sprite.setDepth(calculateDepth(gridY) + 60)
+          const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
+          villager.sprite.setDepth(calculateDepth(gridX, gridY) + 60)
         }
       }
     }
@@ -905,6 +908,41 @@ export class GameScene extends Phaser.Scene {
 
     // Update cut trees
     this.updateCutTrees(this.game.loop.delta)
+  }
+
+  /**
+   * Handle window resize
+   */
+  private handleResize(gameSize: Phaser.Structs.Size): void {
+    const width = gameSize.width
+    const height = gameSize.height
+
+    // Update camera viewport
+    this.cameras.main.setSize(width, height)
+
+    // Update UI positions to match new screen size
+    if (this.woodText) {
+      // Keep wood counter at top-left
+      this.woodText.setPosition(20, 20)
+    }
+
+    // Update building buttons at bottom
+    const menuY = height - 60
+    const firstButtonX = width / 2 - 60
+    const teepeeButtonX = width / 2 + 60
+
+    if (this.houseButtonBg) {
+      this.houseButtonBg.setPosition(firstButtonX, menuY)
+    }
+    if (this.houseButton) {
+      this.houseButton.setPosition(firstButtonX, menuY)
+    }
+    if (this.teepeeButtonBg) {
+      this.teepeeButtonBg.setPosition(teepeeButtonX, menuY)
+    }
+    if (this.teepeeButton) {
+      this.teepeeButton.setPosition(teepeeButtonX, menuY)
+    }
   }
 
   /**

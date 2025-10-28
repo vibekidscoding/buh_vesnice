@@ -43,13 +43,15 @@ export function screenToGrid(screenX: number, screenY: number): GridPosition {
 }
 
 /**
- * Calculate Z-depth for proper layering
- * Objects with higher gridY should render on top
+ * Calculate Z-depth for proper layering in isometric view
+ * In isometric, objects with higher (gridX + gridY) appear lower on screen
+ * and should render on top of objects with lower values
+ * @param gridX Grid X position
  * @param gridY Grid Y position
  * @returns Z-depth value
  */
-export function calculateDepth(gridY: number): number {
-  return gridY * 100
+export function calculateDepth(gridX: number, gridY: number): number {
+  return (gridX + gridY) * 100
 }
 
 /**
