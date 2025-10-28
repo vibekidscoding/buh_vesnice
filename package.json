@@ -1,0 +1,29 @@
+{
+  "name": "buh-vesnice",
+  "version": "0.1.0",
+  "description": "Isometrická hra o budování vesnice v lese",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build && gh-pages -d dist"
+  },
+  "dependencies": {
+    "phaser": "^3.80.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "gh-pages": "^6.1.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11"
+  },
+  "keywords": [
+    "phaser",
+    "game",
+    "isometric",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT"
+}

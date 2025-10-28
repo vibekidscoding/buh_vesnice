@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bůh Vesnice</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background-color: #1a1a1a;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+    }
+
+    #game-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 14px;
+      z-index: 1000;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <div>Bůh Vesnice - Prototyp</div>
+    <div style="margin-top: 8px; font-size: 12px;">
+      Ovládání: Šipky nebo WASD pro pohyb<br>
+      Myš: Táhněte pro posun kamery<br>
+      <span style="color: #90EE90;">■</span> Louka
+      <span style="color: #228B22;">■</span> Les
+      <span style="color: #4682B4;">■</span> Voda
+    </div>
+  </div>
+  <div id="game-container"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
