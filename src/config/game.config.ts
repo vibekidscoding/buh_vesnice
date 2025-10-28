@@ -1,5 +1,5 @@
 import Phaser from 'phaser'
-import { GAME_WIDTH, GAME_HEIGHT, GAME_TITLE } from './constants'
+import { GAME_WIDTH, GAME_HEIGHT } from './constants'
 
 /**
  * Phaser Game Configuration

@@ -152,7 +152,7 @@ export class GameScene extends Phaser.Scene {
     // Create a container for positioning
     this.terrainContainer = this.add.container(0, 0)
     // Enable depth sorting within container
-    this.terrainContainer.sortableChildren = true
+    ;(this.terrainContainer as any).sortableChildren = true
 
     // Store tree and rock data to create after container positioning
     const treeData: Array<{gridX: number, gridY: number, x: number, y: number}> = []
