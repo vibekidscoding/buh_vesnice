@@ -441,7 +441,7 @@ export class GameScene extends Phaser.Scene {
     // Create ghost building sprite
     this.ghostBuilding = this.add.image(0, 0, buildingType)
     this.ghostBuilding.setAlpha(0.6)
-    this.ghostBuilding.setDepth(9000)
+    // Depth will be set dynamically in update() based on grid position
 
     // Scale based on building type
     if (buildingType === 'house') {
@@ -582,19 +582,18 @@ export class GameScene extends Phaser.Scene {
     const centerY = gridY + 1.0
     const { x, y } = gridToScreen(centerX, centerY)
 
-    // Create house sprite - add to scene directly for proper depth sorting
-    const worldX = x + this.terrainContainer.x
-    const worldY = y + TILE_HEIGHT + this.terrainContainer.y
-    const house = this.add.image(worldX, worldY, 'house')
+    // Create house sprite - add to container for proper depth sorting
+    const house = this.add.image(x, y + TILE_HEIGHT, 'house')
     const houseScale = ((TILE_WIDTH * 2) / house.width) * 1.5  // Same scale as ghost house
     house.setScale(houseScale)
     house.setOrigin(0.5, 1)
-    house.setScrollFactor(1, 1) // Make sure it scrolls with camera like terrain
 
-    // Use screen Y position for accurate depth sorting in isometric view
-    const depth = worldY
-    house.setDepth(depth)
-    console.log(`House placed at grid (${gridX}, ${gridY}) to (${gridX+1}, ${gridY+1}), world: (${worldX}, ${worldY}), depth: ${depth}`)
+    // Add to container for proper depth sorting with all other objects
+    this.terrainContainer.add(house)
+
+    // Use same depth calculation as other objects - buildings are tall so add extra offset
+    house.setDepth(calculateDepth(gridX + 1, gridY + 1) + 70)
+    console.log(`House placed at grid (${gridX}, ${gridY}) to (${gridX+1}, ${gridY+1}), depth: ${house.depth}`)
 
     this.houses.push(house)
 
@@ -627,19 +626,18 @@ export class GameScene extends Phaser.Scene {
     const centerY = gridY + 0.5
     const { x, y } = gridToScreen(centerX, centerY)
 
-    // Create teepee sprite - add to scene directly for proper depth sorting
-    const worldX = x + this.terrainContainer.x
-    const worldY = y + TILE_HEIGHT + this.terrainContainer.y
-    const teepee = this.add.image(worldX, worldY, 'teepee')
+    // Create teepee sprite - add to container for proper depth sorting
+    const teepee = this.add.image(x, y + TILE_HEIGHT, 'teepee')
     const teepeeScale = (TILE_WIDTH / teepee.width) * 0.8  // Same scale as ghost teepee
     teepee.setScale(teepeeScale)
     teepee.setOrigin(0.5, 1)
-    teepee.setScrollFactor(1, 1) // Make sure it scrolls with camera like terrain
 
-    // Use screen Y position for accurate depth sorting in isometric view
-    const depth = worldY
-    teepee.setDepth(depth)
-    console.log(`Teepee placed at grid (${gridX}, ${gridY}), world: (${worldX}, ${worldY}), depth: ${depth}`)
+    // Add to container for proper depth sorting with all other objects
+    this.terrainContainer.add(teepee)
+
+    // Use same depth calculation as other objects - buildings are tall so add extra offset
+    teepee.setDepth(calculateDepth(gridX, gridY) + 70)
+    console.log(`Teepee placed at grid (${gridX}, ${gridY}), depth: ${teepee.depth}`)
 
     this.teepees.push(teepee)
 
@@ -867,6 +865,11 @@ export class GameScene extends Phaser.Scene {
       const centerOffset = size === 2 ? 1.0 : 0.5
       const { x, y } = gridToScreen(gridX + centerOffset, gridY + centerOffset)
       this.ghostBuilding.setPosition(x, y + TILE_HEIGHT)
+
+      // Update depth based on grid position
+      const depthGridX = size === 2 ? gridX + 1 : gridX
+      const depthGridY = size === 2 ? gridY + 1 : gridY
+      this.ghostBuilding.setDepth(calculateDepth(depthGridX, depthGridY) + 70)
 
       // Check if valid placement and tint accordingly
       const valid = this.isValidPlacement(gridX, gridY, size)
