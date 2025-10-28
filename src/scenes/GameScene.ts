@@ -210,7 +210,7 @@ export class GameScene extends Phaser.Scene {
     // Make sure terrain follows camera
     this.terrainContainer.setScrollFactor(1, 1)
 
-    // NOW create trees - they should be in container like tiles, but rendered outside for depth sorting
+    // NOW create trees - they should be in container like tiles
     console.log(`Creating ${treeData.length} trees`)
     for (const data of treeData) {
       // Use local coordinates (x, y from gridToScreen)
@@ -224,8 +224,8 @@ export class GameScene extends Phaser.Scene {
       // Important: Add to container BEFORE setting depth
       this.terrainContainer.add(tree)
 
-      // Use local Y position for depth sorting within container
-      tree.setDepth(data.y + TILE_HEIGHT)
+      // Use same depth calculation as tiles, with offset to render above base tile
+      tree.setDepth(calculateDepth(data.gridY) + 50)
       this.trees.push(tree)
       this.treeMap.set(`${data.gridX},${data.gridY}`, tree)
     }
@@ -244,8 +244,8 @@ export class GameScene extends Phaser.Scene {
       // Important: Add to container BEFORE setting depth
       this.terrainContainer.add(rock)
 
-      // Use local Y position for depth sorting within container
-      rock.setDepth(data.y + TILE_HEIGHT)
+      // Use same depth calculation as tiles, with small offset (rocks at ground level)
+      rock.setDepth(calculateDepth(data.gridY) + 10)
       this.rocks.push(rock)
       this.rockMap.set(`${data.gridX},${data.gridY}`, rock)
     }
@@ -660,21 +660,21 @@ export class GameScene extends Phaser.Scene {
     const spawnY = gridY + 0.5
     const { x, y } = gridToScreen(spawnX, spawnY)
 
-    const worldX = x + this.terrainContainer.x
-    const worldY = y + TILE_HEIGHT + this.terrainContainer.y
-
-    const villager = this.add.image(worldX, worldY, 'villager_walk_1')
+    // Create villager using local coordinates and add to container
+    const villager = this.add.image(x, y + TILE_HEIGHT, 'villager_walk_1')
     villager.setOrigin(0.5, 1)
-    villager.setScrollFactor(1, 1)
 
     // Scale villager to be smaller than buildings
     const villagerScale = (TILE_WIDTH / villager.width) * 0.4
     villager.setScale(villagerScale)
-    villager.setDepth(worldY)
 
-    // Find initial target based on type
-    let targetX = worldX
-    let targetY = worldY
+    // Add to container for proper depth sorting with trees/rocks
+    this.terrainContainer.add(villager)
+    villager.setDepth(calculateDepth(gridY) + 60)
+
+    // Find initial target based on type (use local coordinates since villager is in container)
+    let targetX = x
+    let targetY = y + TILE_HEIGHT
     let targetGridX = gridX
     let targetGridY = gridY
 
@@ -683,8 +683,8 @@ export class GameScene extends Phaser.Scene {
       const forest = this.findNearestForest(gridX, gridY)
       if (forest) {
         const forestScreen = gridToScreen(forest.gridX + 0.5, forest.gridY + 0.5)
-        targetX = forestScreen.x + this.terrainContainer.x
-        targetY = forestScreen.y + TILE_HEIGHT + this.terrainContainer.y
+        targetX = forestScreen.x
+        targetY = forestScreen.y + TILE_HEIGHT
         targetGridX = forest.gridX
         targetGridY = forest.gridY
       }
@@ -693,8 +693,8 @@ export class GameScene extends Phaser.Scene {
       const randomGridX = gridX + Phaser.Math.Between(-5, 5)
       const randomGridY = gridY + Phaser.Math.Between(-5, 5)
       const wanderScreen = gridToScreen(randomGridX, randomGridY)
-      targetX = wanderScreen.x + this.terrainContainer.x
-      targetY = wanderScreen.y + TILE_HEIGHT + this.terrainContainer.y
+      targetX = wanderScreen.x
+      targetY = wanderScreen.y + TILE_HEIGHT
       targetGridX = randomGridX
       targetGridY = randomGridY
     }
@@ -707,8 +707,8 @@ export class GameScene extends Phaser.Scene {
       targetY,
       targetGridX,
       targetGridY,
-      homeX: worldX,
-      homeY: worldY,
+      homeX: x,
+      homeY: y + TILE_HEIGHT,
       speed: 1,
       animFrame: 0,
       animTimer: 0,
@@ -810,13 +810,13 @@ export class GameScene extends Phaser.Scene {
                 console.log(`Wood delivered! Total: ${this.woodCount}`)
               }
 
-              // Go to forest
-              const { gridX, gridY } = screenToGrid(villager.sprite.x - this.terrainContainer.x, villager.sprite.y - this.terrainContainer.y)
+              // Go to forest (use local coordinates)
+              const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
               const forest = this.findNearestForest(gridX, gridY)
               if (forest) {
                 const forestScreen = gridToScreen(forest.gridX + 0.5, forest.gridY + 0.5)
-                villager.targetX = forestScreen.x + this.terrainContainer.x
-                villager.targetY = forestScreen.y + TILE_HEIGHT + this.terrainContainer.y
+                villager.targetX = forestScreen.x
+                villager.targetY = forestScreen.y + TILE_HEIGHT
                 villager.targetGridX = forest.gridX
                 villager.targetGridY = forest.gridY
               }
@@ -828,21 +828,22 @@ export class GameScene extends Phaser.Scene {
               console.log('Villager started cutting wood')
             }
           } else {
-            // Teepee villagers wander randomly
-            const { gridX, gridY } = screenToGrid(villager.sprite.x - this.terrainContainer.x, villager.sprite.y - this.terrainContainer.y)
+            // Teepee villagers wander randomly (use local coordinates)
+            const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
             const randomGridX = gridX + Phaser.Math.Between(-10, 10)
             const randomGridY = gridY + Phaser.Math.Between(-10, 10)
             const wanderScreen = gridToScreen(randomGridX, randomGridY)
-            villager.targetX = wanderScreen.x + this.terrainContainer.x
-            villager.targetY = wanderScreen.y + TILE_HEIGHT + this.terrainContainer.y
+            villager.targetX = wanderScreen.x
+            villager.targetY = wanderScreen.y + TILE_HEIGHT
           }
         } else {
           // Move towards target
           villager.sprite.x += (dx / distance) * villager.speed
           villager.sprite.y += (dy / distance) * villager.speed
 
-          // Update depth based on Y position for proper sorting
-          villager.sprite.setDepth(villager.sprite.y)
+          // Update depth based on grid position for proper sorting with trees/rocks
+          const { gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
+          villager.sprite.setDepth(calculateDepth(gridY) + 60)
         }
       }
     }
