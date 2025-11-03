@@ -7,10 +7,19 @@ import {
   TERRAIN_COLORS,
   TERRAIN_CONFIG,
   TerrainType,
-  CAMERA_SPEED
+  CAMERA_SPEED,
+  VILLAGER_ANIM_INTERVAL,
+  VILLAGER_SPEED,
+  VILLAGER_SCALE_FACTOR,
+  TREE_WORK_DURATION,
+  WOOD_PER_DELIVERY,
+  FOREST_TO_MEADOW_DELAY,
+  TERRAIN_OBJECT_SCALES
 } from '@/config/constants'
 import { gridToScreen, screenToGrid, calculateDepth } from '@/utils/isometric'
+import { gridToWorld } from '@/utils/coordinates'
 import { NoiseGenerator } from '@/utils/noise'
+import type { Villager, CutTree, TerrainObjectData, BuildingType } from '@/types/game'
 
 /**
  * GameScene
@@ -29,25 +38,10 @@ export class GameScene extends Phaser.Scene {
   private occupiedTiles: Set<string> = new Set() // Track occupied tiles (format: "x,y")
 
   // Cut tree tracking
-  private cutTrees: Array<{gridX: number, gridY: number, timer: number}> = []
+  private cutTrees: CutTree[] = []
 
   // Villagers
-  private villagers: Array<{
-    sprite: Phaser.GameObjects.Image
-    type: 'house' | 'teepee'
-    state: 'idle' | 'walking' | 'working'
-    targetX: number
-    targetY: number
-    targetGridX: number
-    targetGridY: number
-    homeX: number
-    homeY: number
-    speed: number
-    animFrame: number
-    animTimer: number
-    workTimer: number
-    hasWood: boolean
-  }> = []
+  private villagers: Villager[] = []
 
   // Resources
   private woodCount: number = 0
@@ -67,7 +61,7 @@ export class GameScene extends Phaser.Scene {
 
   // Building placement
   private placementMode = false
-  private placementBuildingType: 'house' | 'teepee' | null = null
+  private placementBuildingType: BuildingType | null = null
   private ghostBuilding: Phaser.GameObjects.Image | null = null
   private justEnteredPlacementMode = false
   private houseButton: Phaser.GameObjects.Image | null = null
@@ -213,48 +207,47 @@ export class GameScene extends Phaser.Scene {
     // Make sure terrain follows camera
     this.terrainContainer.setScrollFactor(1, 1)
 
-    // NOW create trees - use world coordinates and Y-based depth
+    // Create trees using helper method
     console.log(`Creating ${treeData.length} trees`)
     for (const data of treeData) {
-      // Use world coordinates
-      const worldX = data.x + this.terrainContainer.x
-      const worldY = data.y + TILE_HEIGHT + this.terrainContainer.y
-      const tree = this.add.image(worldX, worldY, 'tree')
-      tree.setOrigin(0.5, 1) // Bottom-center anchor
-      tree.setScrollFactor(1, 1)
-
-      // Scale tree to fit tile size (TILE_WIDTH = 64)
-      const treeScale = TILE_WIDTH / tree.width * 1.2
-      tree.setScale(treeScale)
-
-      // Use Y position as depth for proper isometric sorting
-      tree.setDepth(worldY)
-      this.trees.push(tree)
-      this.treeMap.set(`${data.gridX},${data.gridY}`, tree)
+      this.createTerrainObject('tree', data, this.treeMap, this.trees)
     }
 
-    // NOW create rocks - use world coordinates and Y-based depth
+    // Create rocks using helper method
     console.log(`Creating ${rockData.length} rocks`)
     for (const data of rockData) {
-      // Use world coordinates
-      const worldX = data.x + this.terrainContainer.x
-      const worldY = data.y + TILE_HEIGHT + this.terrainContainer.y
-      const rock = this.add.image(worldX, worldY, 'rocks')
-      rock.setOrigin(0.5, 1) // Bottom-center anchor
-      rock.setScrollFactor(1, 1)
-
-      // Scale rock to fit tile size
-      const rockScale = TILE_WIDTH / rock.width * 1.0
-      rock.setScale(rockScale)
-
-      // Use Y position as depth for proper isometric sorting
-      rock.setDepth(worldY)
-      this.rocks.push(rock)
-      this.rockMap.set(`${data.gridX},${data.gridY}`, rock)
+      this.createTerrainObject('rocks', data, this.rockMap, this.rocks)
     }
 
     console.log(`Total terrain tiles: ${WORLD_WIDTH * WORLD_HEIGHT}`)
     console.log(`Trees created: ${this.trees.length}, Rocks created: ${this.rocks.length}`)
+  }
+
+  /**
+   * Create a terrain object (tree or rock) at given position
+   * @param type - Type of terrain object ('tree' or 'rocks')
+   * @param data - Position data for the object
+   * @param targetMap - Map to store the created object
+   * @param targetArray - Array to store the created object
+   */
+  private createTerrainObject(
+    type: 'tree' | 'rocks',
+    data: TerrainObjectData,
+    targetMap: Map<string, Phaser.GameObjects.Image>,
+    targetArray: Phaser.GameObjects.Image[]
+  ): void {
+    const { worldX, worldY } = gridToWorld(data.gridX, data.gridY, this.terrainContainer.x, this.terrainContainer.y)
+    const object = this.add.image(worldX, worldY, type)
+    object.setOrigin(0.5, 1)
+    object.setScrollFactor(1, 1)
+
+    const scaleFactor = TERRAIN_OBJECT_SCALES[type]
+    const scale = (TILE_WIDTH / object.width) * scaleFactor
+    object.setScale(scale)
+
+    object.setDepth(worldY)
+    targetArray.push(object)
+    targetMap.set(`${data.gridX},${data.gridY}`, object)
   }
 
   /**
@@ -654,7 +647,7 @@ export class GameScene extends Phaser.Scene {
   /**
    * Spawn a villager at a building
    */
-  private spawnVillager(gridX: number, gridY: number, type: 'house' | 'teepee'): void {
+  private spawnVillager(gridX: number, gridY: number, type: BuildingType): void {
     const spawnX = gridX + 0.5
     const spawnY = gridY + 0.5
     const { x, y } = gridToScreen(spawnX, spawnY)
@@ -667,7 +660,7 @@ export class GameScene extends Phaser.Scene {
     villager.setScrollFactor(1, 1)
 
     // Scale villager to be smaller than buildings
-    const villagerScale = (TILE_WIDTH / villager.width) * 0.4
+    const villagerScale = (TILE_WIDTH / villager.width) * VILLAGER_SCALE_FACTOR
     villager.setScale(villagerScale)
 
     // Use Y position as depth for proper isometric sorting
@@ -710,7 +703,7 @@ export class GameScene extends Phaser.Scene {
       targetGridY,
       homeX: worldX,
       homeY: worldY,
-      speed: 1,
+      speed: VILLAGER_SPEED,
       animFrame: 0,
       animTimer: 0,
       workTimer: 0,
@@ -748,7 +741,7 @@ export class GameScene extends Phaser.Scene {
       // Update animation timer (only when walking)
       if (villager.state === 'walking') {
         villager.animTimer += delta
-        if (villager.animTimer > 300) { // Switch frame every 300ms
+        if (villager.animTimer > VILLAGER_ANIM_INTERVAL) {
           villager.animTimer = 0
           villager.animFrame = (villager.animFrame + 1) % 2
           villager.sprite.setTexture(villager.animFrame === 0 ? 'villager_walk_1' : 'villager_walk_2')
@@ -758,7 +751,7 @@ export class GameScene extends Phaser.Scene {
       // Handle working state (cutting trees)
       if (villager.state === 'working') {
         villager.workTimer += delta
-        if (villager.workTimer > 2000) { // Work for 2 seconds
+        if (villager.workTimer > TREE_WORK_DURATION) {
           villager.workTimer = 0
           villager.state = 'walking'
           villager.hasWood = true
@@ -803,7 +796,7 @@ export class GameScene extends Phaser.Scene {
               // Arrived home
               if (villager.hasWood) {
                 // Deliver wood
-                this.woodCount += 3
+                this.woodCount += WOOD_PER_DELIVERY
                 villager.hasWood = false
                 if (this.woodText) {
                   this.woodText.setText(`🪵 Dřevo: ${this.woodCount}`)
@@ -955,7 +948,7 @@ export class GameScene extends Phaser.Scene {
       const cutTree = this.cutTrees[i]
       cutTree.timer += delta
 
-      if (cutTree.timer > 5000) { // 5 seconds
+      if (cutTree.timer > FOREST_TO_MEADOW_DELAY) {
         // Change terrain type to meadow
         this.terrain[cutTree.gridY][cutTree.gridX] = TerrainType.MEADOW
 

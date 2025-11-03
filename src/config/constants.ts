@@ -47,3 +47,35 @@ export const TERRAIN_CONFIG = {
 export const GAME_WIDTH = 1280
 export const GAME_HEIGHT = 720
 export const GAME_TITLE = 'Bůh Vesnice'
+
+// Villager settings
+export const VILLAGER_ANIM_INTERVAL = 300  // ms between animation frames
+export const VILLAGER_SPEED = 1
+export const VILLAGER_SCALE_FACTOR = 0.4
+
+// Work timings
+export const TREE_WORK_DURATION = 2000  // ms to cut a tree
+export const WOOD_PER_DELIVERY = 3
+export const FOREST_TO_MEADOW_DELAY = 5000  // ms before forest becomes meadow
+
+// Building settings
+export const BUILDING_CONFIG = {
+  house: {
+    size: 2,        // 2x2 tiles
+    centerOffset: 1.0,
+    scaleFactor: 1.5,
+    textureKey: 'house'
+  },
+  teepee: {
+    size: 1,        // 1x1 tile
+    centerOffset: 0.5,
+    scaleFactor: 0.8,
+    textureKey: 'teepee'
+  }
+} as const
+
+// Terrain object scale factors
+export const TERRAIN_OBJECT_SCALES = {
+  tree: 1.2,
+  rocks: 1.0
+} as const
