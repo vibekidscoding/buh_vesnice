@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { ASSETS } from '@/config/constants'
 
 /**
  * BootScene
@@ -46,20 +47,21 @@ export class BootScene extends Phaser.Scene {
     })
 
     // Load terrain assets
-    this.load.image('tree', 'assets/sprites/terrain/tree.png')
-    this.load.image('rocks', 'assets/sprites/terrain/rocks.png')
+    this.load.image(ASSETS.TERRAIN.TREE, 'assets/sprites/terrain/tree.png')
+    this.load.image(ASSETS.TERRAIN.ROCKS, 'assets/sprites/terrain/rocks.png')
 
     // Load building assets
-    this.load.image('house', 'assets/sprites/buildings/house.png')
-    this.load.image('teepee', 'assets/sprites/buildings/teepee.png')
+    this.load.image(ASSETS.BUILDINGS.HOUSE, 'assets/sprites/buildings/house.png')
+    this.load.image(ASSETS.BUILDINGS.TEEPEE, 'assets/sprites/buildings/teepee.png')
 
     // Load villager assets for animation
-    this.load.image('villager_walk_1', 'assets/sprites/villagers/postava_krok_1.png')
-    this.load.image('villager_walk_2', 'assets/sprites/villagers/postava_krok_2.png')
+    this.load.image(ASSETS.VILLAGERS.WALK_1, 'assets/sprites/villagers/postava_krok_1.png')
+    this.load.image(ASSETS.VILLAGERS.WALK_2, 'assets/sprites/villagers/postava_krok_2.png')
   }
 
   create(): void {
     // Transition to the game scene
+    console.log('BootScene complete, starting GameScene')
     this.scene.start('GameScene')
   }
 }

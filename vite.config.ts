@@ -2,9 +2,8 @@ import { defineConfig } from 'vite'
 import { resolve } from 'path'
 
 export default defineConfig({
-  // Use repository name for GitHub Pages, or './' for local development
-  // Change 'buh_vesnice' to your GitHub repository name
-  base: process.env.NODE_ENV === 'production' ? '/buh_vesnice/' : './',
+  // Use relative paths for maximum compatibility
+  base: './',
   resolve: {
     alias: {
       '@': resolve(__dirname, './src')
@@ -22,7 +21,8 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000,
-    open: true
+    port: 3005,
+    open: false,
+    host: '0.0.0.0'
   }
 })

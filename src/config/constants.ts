@@ -79,3 +79,45 @@ export const TERRAIN_OBJECT_SCALES = {
   tree: 1.2,
   rocks: 1.0
 } as const
+
+// UI Configuration
+export const UI_CONFIG = {
+  menuBarHeight: 100,
+  buttonSize: 60,
+  buttonSpacing: 80,
+  firstButtonX: 50,
+  colors: {
+    menuBackground: 0x2a2a2a,
+    buttonBackground: 0x4a4a4a,
+    hoverTint: 0xaaaaaa,
+    textWhite: '#ffffff',
+    textBackground: '#2a2a2a'
+  },
+  alphas: {
+    menuBackground: 0.9,
+    ghostBuilding: 0.6
+  },
+  depths: {
+    uiContainer: 10000,
+    menuBackground: 10000,
+    buttonBackground: 10001,
+    buttonIcon: 10002,
+    text: 10003
+  }
+}
+
+// Asset Keys
+export const ASSETS = {
+  BUILDINGS: {
+    HOUSE: 'house',
+    TEEPEE: 'teepee'
+  },
+  VILLAGERS: {
+    WALK_1: 'villager_walk_1',
+    WALK_2: 'villager_walk_2'
+  },
+  TERRAIN: {
+    TREE: 'tree',
+    ROCKS: 'rocks'
+  }
+}

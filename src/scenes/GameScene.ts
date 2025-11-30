@@ -7,19 +7,20 @@ import {
   TERRAIN_COLORS,
   TERRAIN_CONFIG,
   TerrainType,
-  CAMERA_SPEED,
   VILLAGER_ANIM_INTERVAL,
   VILLAGER_SPEED,
   VILLAGER_SCALE_FACTOR,
   TREE_WORK_DURATION,
   WOOD_PER_DELIVERY,
   FOREST_TO_MEADOW_DELAY,
-  TERRAIN_OBJECT_SCALES
+  TERRAIN_OBJECT_SCALES,
+  ASSETS
 } from '@/config/constants'
-import { gridToScreen, screenToGrid, calculateDepth } from '@/utils/isometric'
-import { gridToWorld } from '@/utils/coordinates'
+import { gridToScreen, screenToGrid } from '@/utils/isometric'
 import { NoiseGenerator } from '@/utils/noise'
 import type { Villager, CutTree, TerrainObjectData, BuildingType } from '@/types/game'
+import { InputManager } from '@/systems/InputManager'
+import { UIManager } from '@/ui/UIManager'
 
 /**
  * GameScene
@@ -45,32 +46,23 @@ export class GameScene extends Phaser.Scene {
 
   // Resources
   private woodCount: number = 0
-  private woodText: Phaser.GameObjects.Text | null = null
   private noiseGenerator!: NoiseGenerator
-  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys
-  private wasd!: {
-    W: Phaser.Input.Keyboard.Key
-    A: Phaser.Input.Keyboard.Key
-    S: Phaser.Input.Keyboard.Key
-    D: Phaser.Input.Keyboard.Key
-  }
-  private isDragging = false
-  private dragStartX = 0
-  private dragStartY = 0
-  private dragMoved = false
+
+  // Managers
+  private inputManager!: InputManager
+  private uiManager!: UIManager
 
   // Building placement
   private placementMode = false
   private placementBuildingType: BuildingType | null = null
   private ghostBuilding: Phaser.GameObjects.Image | null = null
   private justEnteredPlacementMode = false
-  private houseButton: Phaser.GameObjects.Image | null = null
-  private teepeeButton: Phaser.GameObjects.Image | null = null
+  
+  // Containers
   private terrainContainer!: Phaser.GameObjects.Container
-  private uiContainer!: Phaser.GameObjects.Container
-  private menuBg: Phaser.GameObjects.Graphics | null = null
-  private houseButtonBg: Phaser.GameObjects.Graphics | null = null
-  private teepeeButtonBg: Phaser.GameObjects.Graphics | null = null
+  private groundContainer!: Phaser.GameObjects.Container
+  private objectsContainer!: Phaser.GameObjects.Container
+  
   private gridOverlay: Phaser.GameObjects.Graphics | null = null
   private placementHandler: ((pointer: Phaser.Input.Pointer) => void) | null = null
 
@@ -81,6 +73,21 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     console.log('GameScene created')
 
+    // Debug: Check if textures exist
+    const texturesToCheck = ['house', 'teepee', 'tree', 'rocks', 'villager_walk_1']
+    texturesToCheck.forEach(key => {
+      const exists = this.textures.exists(key)
+      console.log(`Texture '${key}' exists:`, exists)
+      if (!exists) {
+        console.warn(`WARNING: Texture '${key}' is missing! Creating placeholder.`)
+        // Create a simple placeholder texture if missing
+        const graphics = this.make.graphics({ x: 0, y: 0 })
+        graphics.fillStyle(0xff00ff, 1)
+        graphics.fillRect(0, 0, 256, 256)
+        graphics.generateTexture(key, 256, 256)
+      }
+    })
+
     // Initialize noise generator
     this.noiseGenerator = new NoiseGenerator(Date.now())
 
@@ -90,14 +97,12 @@ export class GameScene extends Phaser.Scene {
     // Render terrain tiles
     this.renderTerrain()
 
-    // Setup camera
-    this.setupCamera()
-
-    // Setup input
-    this.setupInput()
-
-    // Setup UI
-    this.setupUI()
+    // Initialize Managers
+    this.inputManager = new InputManager(this)
+    this.uiManager = new UIManager(this, {
+      onBuildSelect: (type: BuildingType) => this.enterPlacementMode(type)
+    })
+    this.uiManager.create()
 
     // Listen for resize events
     this.scale.on('resize', this.handleResize, this)
@@ -146,15 +151,25 @@ export class GameScene extends Phaser.Scene {
    * Render terrain tiles as isometric diamonds
    */
   private renderTerrain(): void {
-    // Create a container for positioning (tiles only)
+    // Create main container for positioning
     this.terrainContainer = this.add.container(0, 0)
-    // Tiles don't need depth sorting between themselves
-    ;(this.terrainContainer as any).sortableChildren = false
+    
+    // Create layers
+    this.groundContainer = this.add.container(0, 0)
+    this.objectsContainer = this.add.container(0, 0)
+    
+    // IMPORTANT: objectsContainer sorts children by depth (which will be set to Y)
+    ;(this.objectsContainer as any).sortableChildren = true
+    
+    // Add layers to terrain container
+    this.terrainContainer.add(this.groundContainer)
+    this.terrainContainer.add(this.objectsContainer)
 
     // Store tree and rock data to create after container positioning
     const treeData: Array<{gridX: number, gridY: number, x: number, y: number}> = []
     const rockData: Array<{gridX: number, gridY: number, x: number, y: number}> = []
 
+    // Draw tiles from top to bottom
     for (let gridY = 0; gridY < WORLD_HEIGHT; gridY++) {
       for (let gridX = 0; gridX < WORLD_WIDTH; gridX++) {
         const terrainType = this.terrain[gridY][gridX]
@@ -173,10 +188,9 @@ export class GameScene extends Phaser.Scene {
         tile.closePath()
         tile.fillPath()
 
-        // Set depth for proper rendering order
-        tile.setDepth(calculateDepth(gridX, gridY))
-
-        this.terrainContainer.add(tile)
+        // No depth needed for tiles if added in order to groundContainer
+        this.groundContainer.add(tile)
+        
         this.tiles.push(tile)
         this.tileGraphicsMap.set(`${gridX},${gridY}`, tile)
 
@@ -210,13 +224,13 @@ export class GameScene extends Phaser.Scene {
     // Create trees using helper method
     console.log(`Creating ${treeData.length} trees`)
     for (const data of treeData) {
-      this.createTerrainObject('tree', data, this.treeMap, this.trees)
+      this.createTerrainObject(ASSETS.TERRAIN.TREE, data, this.treeMap, this.trees)
     }
 
     // Create rocks using helper method
     console.log(`Creating ${rockData.length} rocks`)
     for (const data of rockData) {
-      this.createTerrainObject('rocks', data, this.rockMap, this.rocks)
+      this.createTerrainObject(ASSETS.TERRAIN.ROCKS, data, this.rockMap, this.rocks)
     }
 
     console.log(`Total terrain tiles: ${WORLD_WIDTH * WORLD_HEIGHT}`)
@@ -231,193 +245,38 @@ export class GameScene extends Phaser.Scene {
    * @param targetArray - Array to store the created object
    */
   private createTerrainObject(
-    type: 'tree' | 'rocks',
+    type: string,
     data: TerrainObjectData,
     targetMap: Map<string, Phaser.GameObjects.Image>,
     targetArray: Phaser.GameObjects.Image[]
   ): void {
-    const { worldX, worldY } = gridToWorld(data.gridX, data.gridY, this.terrainContainer.x, this.terrainContainer.y)
-    const object = this.add.image(worldX, worldY, type)
+    // Add to objects container, so use local coordinates (x, y) not world coordinates
+    const object = this.add.image(data.x, data.y + TILE_HEIGHT, type)
     object.setOrigin(0.5, 1)
-    object.setScrollFactor(1, 1)
+    
+    // Determine scale based on type
+    let scaleFactor = 1.0
+    if (type === ASSETS.TERRAIN.TREE) scaleFactor = TERRAIN_OBJECT_SCALES.tree
+    else if (type === ASSETS.TERRAIN.ROCKS) scaleFactor = TERRAIN_OBJECT_SCALES.rocks
 
-    const scaleFactor = TERRAIN_OBJECT_SCALES[type]
     const scale = (TILE_WIDTH / object.width) * scaleFactor
     object.setScale(scale)
 
-    object.setDepth(worldY)
+    // Depth based on grid position (gridX + gridY)
+    // We use the data.gridX/Y directly for static objects for stability
+    // Adding 1 ensures it sits above the flat tile at the same grid coord
+    object.setDepth(data.gridX + data.gridY + 1)
+    
+    this.objectsContainer.add(object)
     targetArray.push(object)
     targetMap.set(`${data.gridX},${data.gridY}`, object)
-  }
 
-  /**
-   * Setup camera controls
-   */
-  private setupCamera(): void {
-    const camera = this.cameras.main
-
-    // Remove camera bounds to allow free movement
-    camera.removeBounds()
-
-    // Enable camera dragging with mouse
-    camera.setZoom(1)
-  }
-
-  /**
-   * Setup keyboard and mouse input
-   */
-  private setupInput(): void {
-    // Arrow keys
-    this.cursors = this.input.keyboard!.createCursorKeys()
-
-    // WASD keys
-    this.wasd = {
-      W: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      A: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-      S: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-      D: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D)
-    }
-
-    // Mouse drag to pan
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      // Check if we clicked on an interactive UI object
-      const uiAreaHeight = 100
-      const inUIArea = pointer.y >= this.cameras.main.height - uiAreaHeight
-
-      console.log('Global pointerdown, pointer.y:', pointer.y, 'height:', this.cameras.main.height, 'UI threshold:', this.cameras.main.height - uiAreaHeight, 'inUIArea:', inUIArea)
-
-      // If in UI area, check if we hit an interactive object
-      if (inUIArea) {
-        // Don't start dragging in UI area, let UI buttons handle it
-        return
-      }
-
-      // Outside UI area - allow camera dragging
-      console.log('Setting isDragging = true')
-      this.isDragging = true
-      this.dragMoved = false
-      this.dragStartX = pointer.x
-      this.dragStartY = pointer.y
-    })
-
-    this.input.on('pointerup', () => {
-      this.isDragging = false
-      this.dragMoved = false
-    })
-
-    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.isDragging) {
-        this.dragMoved = true
-        const deltaX = pointer.x - this.dragStartX
-        const deltaY = pointer.y - this.dragStartY
-
-        this.cameras.main.scrollX -= deltaX
-        this.cameras.main.scrollY -= deltaY
-
-        this.dragStartX = pointer.x
-        this.dragStartY = pointer.y
-      }
-    })
-
-    // Mouse wheel zoom (disabled)
-    // this.input.on('wheel', (pointer: Phaser.Input.Pointer, gameObjects: any[], deltaX: number, deltaY: number) => {
-    //   const camera = this.cameras.main
-    //   if (deltaY > 0) {
-    //     camera.setZoom(Math.max(0.3, camera.zoom - 0.1))
-    //   } else {
-    //     camera.setZoom(Math.min(2, camera.zoom + 0.1))
-    //   }
-    // })
-  }
-
-  /**
-   * Setup UI elements
-   */
-  private setupUI(): void {
-    const width = this.cameras.main.width
-    const height = this.cameras.main.height
-
-    // Create UI container that won't scroll with camera
-    this.uiContainer = this.add.container(0, 0)
-    this.uiContainer.setScrollFactor(0, 0)
-    this.uiContainer.setDepth(10000)
-
-    // Create building menu at bottom
-    const menuBarHeight = 100
-    const menuY = height - menuBarHeight / 2 // Center of menu bar
-    this.menuBg = this.add.graphics()
-    this.menuBg.fillStyle(0x2a2a2a, 0.9)
-    this.menuBg.fillRect(0, height - menuBarHeight, width, menuBarHeight)
-    this.menuBg.setScrollFactor(0, 0)
-    this.menuBg.setDepth(10000)
-
-    // Button settings
-    const buttonSize = 60
-    const buttonSpacing = 80
-    const firstButtonX = 50
-
-    // House button background
-    this.houseButtonBg = this.add.graphics()
-    this.houseButtonBg.fillStyle(0x4a4a4a, 1)
-    this.houseButtonBg.fillRoundedRect(firstButtonX - buttonSize/2, menuY - buttonSize/2, buttonSize, buttonSize, 8)
-    this.houseButtonBg.setScrollFactor(0, 0)
-    this.houseButtonBg.setDepth(10001)
-
-    // Create house button icon
-    this.houseButton = this.add.image(firstButtonX, menuY, 'house')
-    this.houseButton.setScale(0.15)
-    this.houseButton.setScrollFactor(0, 0)
-    this.houseButton.setDepth(10002)
-    this.houseButton.setInteractive({ useHandCursor: true })
-
-    this.houseButton.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      console.log('House button clicked, dragMoved:', this.dragMoved, 'isDragging:', this.isDragging)
-      pointer.event.stopPropagation()
-      this.enterPlacementMode('house')
-    })
-    this.houseButton.on('pointerover', () => {
-      this.houseButton!.setTint(0xaaaaaa)
-    })
-    this.houseButton.on('pointerout', () => {
-      this.houseButton!.clearTint()
-    })
-
-    // Teepee button background
-    const teepeeButtonX = firstButtonX + buttonSpacing
-    this.teepeeButtonBg = this.add.graphics()
-    this.teepeeButtonBg.fillStyle(0x4a4a4a, 1)
-    this.teepeeButtonBg.fillRoundedRect(teepeeButtonX - buttonSize/2, menuY - buttonSize/2, buttonSize, buttonSize, 8)
-    this.teepeeButtonBg.setScrollFactor(0, 0)
-    this.teepeeButtonBg.setDepth(10001)
-
-    // Create teepee button icon
-    this.teepeeButton = this.add.image(teepeeButtonX, menuY, 'teepee')
-    this.teepeeButton.setScale(0.15)
-    this.teepeeButton.setScrollFactor(0, 0)
-    this.teepeeButton.setDepth(10002)
-    this.teepeeButton.setInteractive({ useHandCursor: true })
-
-    this.teepeeButton.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      console.log('Teepee button clicked, dragMoved:', this.dragMoved, 'isDragging:', this.isDragging)
-      pointer.event.stopPropagation()
-      this.enterPlacementMode('teepee')
-    })
-    this.teepeeButton.on('pointerover', () => {
-      this.teepeeButton!.setTint(0xaaaaaa)
-    })
-    this.teepeeButton.on('pointerout', () => {
-      this.teepeeButton!.clearTint()
-    })
-
-    // Resource counter at top
-    this.woodText = this.add.text(20, 20, '🪵 Dřevo: 0', {
-      font: '24px monospace',
-      color: '#ffffff',
-      backgroundColor: '#2a2a2a',
-      padding: { x: 10, y: 5 }
-    })
-    this.woodText.setScrollFactor(0, 0)
-    this.woodText.setDepth(10003)
+    // Debug: Add text showing depth
+    /*
+    const debugText = this.add.text(data.x, data.y, `${object.depth}`, { font: '10px monospace', color: '#fff' })
+    debugText.setOrigin(0.5, 0.5)
+    this.objectsContainer.add(debugText)
+    */
   }
 
   /**
@@ -431,10 +290,15 @@ export class GameScene extends Phaser.Scene {
     this.justEnteredPlacementMode = true
     console.log(`Placement mode activated: ${buildingType}`)
 
+    // Determine asset key
+    const textureKey = buildingType === 'house' ? ASSETS.BUILDINGS.HOUSE : ASSETS.BUILDINGS.TEEPEE
+
     // Create ghost building sprite
-    this.ghostBuilding = this.add.image(0, 0, buildingType)
+    this.ghostBuilding = this.add.image(0, 0, textureKey)
     this.ghostBuilding.setAlpha(0.6)
-    // Depth will be set dynamically in update() based on grid position
+    
+    // Add to objects container so it sorts correctly with trees/rocks while moving
+    this.objectsContainer.add(this.ghostBuilding)
 
     // Scale based on building type
     if (buildingType === 'house') {
@@ -447,7 +311,6 @@ export class GameScene extends Phaser.Scene {
       this.ghostBuilding.setScale(teepeeScale)
     }
     this.ghostBuilding.setOrigin(0.5, 1)
-    this.ghostBuilding.setScrollFactor(1, 1)
 
     // Create grid overlay
     this.gridOverlay = this.add.graphics()
@@ -472,12 +335,21 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    this.gridOverlay.setDepth(8500) // Below ghost house
+    // Overlay is on top of ground but below objects? No, overlay helps see grid.
+    // Let's put it in objectsContainer with high depth, OR in terrainContainer (above objects)
+    // Putting it in terrainContainer (after objectsContainer) ensures it's always on top
     this.terrainContainer.add(this.gridOverlay)
 
     // Add placement click handler
     this.placementHandler = (pointer: Phaser.Input.Pointer) => {
-      if (!this.placementMode || this.dragMoved || !this.placementBuildingType) return
+      // If we are dragging the camera, DO NOT place a building
+      if (this.inputManager.isDragMoved) {
+        console.log('Placement ignored: Camera was dragged')
+        return
+      }
+
+      // Use inputManager.isDragMoved instead of local dragMoved
+      if (!this.placementMode || !this.placementBuildingType) return
 
       // Ignore first click after entering placement mode (the button click itself)
       if (this.justEnteredPlacementMode) {
@@ -485,9 +357,18 @@ export class GameScene extends Phaser.Scene {
         return
       }
 
-      const worldX = pointer.x + this.cameras.main.scrollX - this.terrainContainer.x
-      const worldY = pointer.y + this.cameras.main.scrollY - this.terrainContainer.y
-      const { gridX, gridY } = screenToGrid(worldX, worldY)
+      // Get world position relative to container
+      const camera = this.cameras.main
+      const worldX = pointer.x + camera.scrollX
+      const worldY = pointer.y + camera.scrollY
+      
+      const localX = worldX - this.terrainContainer.x
+      const localY = worldY - this.terrainContainer.y
+      
+      console.log(`Click at screen(${pointer.x},${pointer.y}) -> world(${worldX},${worldY}) -> local(${localX},${localY})`)
+
+      // Convert local coordinate to grid
+      const { gridX, gridY } = screenToGrid(localX, localY)
 
       const size = this.placementBuildingType === 'house' ? 2 : 1
       if (this.isValidPlacement(gridX, gridY, size)) {
@@ -573,19 +454,18 @@ export class GameScene extends Phaser.Scene {
     const centerY = gridY + 1.0
     const { x, y } = gridToScreen(centerX, centerY)
 
-    // Create house sprite - use world coordinates for Y-based depth sorting
-    const worldX = x + this.terrainContainer.x
-    const worldY = y + TILE_HEIGHT + this.terrainContainer.y
-    const house = this.add.image(worldX, worldY, 'house')
+    // Create house sprite inside container
+    const house = this.add.image(x, y + TILE_HEIGHT, ASSETS.BUILDINGS.HOUSE)
     const houseScale = ((TILE_WIDTH * 2) / house.width) * 1.5  // Same scale as ghost house
     house.setScale(houseScale)
     house.setOrigin(0.5, 1)
-    house.setScrollFactor(1, 1)
-
-    // Use Y position as depth for proper isometric sorting
-    house.setDepth(worldY)
-    console.log(`House placed at grid (${gridX}, ${gridY}) to (${gridX+1}, ${gridY+1}), worldY: ${worldY}, depth: ${house.depth}`)
-
+    
+    // Grid-based depth. House is 2x2.
+    // Center is at gridX+1, gridY+1.
+    // We want it to sort as if it's at the "front" of its footprint.
+    house.setDepth((gridX + 1) + (gridY + 1) + 1)
+    
+    this.objectsContainer.add(house)
     this.houses.push(house)
 
     // Mark all 4 tiles as occupied
@@ -617,19 +497,16 @@ export class GameScene extends Phaser.Scene {
     const centerY = gridY + 0.5
     const { x, y } = gridToScreen(centerX, centerY)
 
-    // Create teepee sprite - use world coordinates for Y-based depth sorting
-    const worldX = x + this.terrainContainer.x
-    const worldY = y + TILE_HEIGHT + this.terrainContainer.y
-    const teepee = this.add.image(worldX, worldY, 'teepee')
+    // Create teepee sprite inside container
+    const teepee = this.add.image(x, y + TILE_HEIGHT, ASSETS.BUILDINGS.TEEPEE)
     const teepeeScale = (TILE_WIDTH / teepee.width) * 0.8  // Same scale as ghost teepee
     teepee.setScale(teepeeScale)
     teepee.setOrigin(0.5, 1)
-    teepee.setScrollFactor(1, 1)
-
-    // Use Y position as depth for proper isometric sorting
-    teepee.setDepth(worldY)
-    console.log(`Teepee placed at grid (${gridX}, ${gridY}), worldY: ${worldY}, depth: ${teepee.depth}`)
-
+    
+    // Grid-based depth
+    teepee.setDepth(gridX + gridY + 1)
+    
+    this.objectsContainer.add(teepee)
     this.teepees.push(teepee)
 
     // Mark tile as occupied
@@ -652,23 +529,23 @@ export class GameScene extends Phaser.Scene {
     const spawnY = gridY + 0.5
     const { x, y } = gridToScreen(spawnX, spawnY)
 
-    // Create villager using world coordinates for Y-based depth sorting
-    const worldX = x + this.terrainContainer.x
-    const worldY = y + TILE_HEIGHT + this.terrainContainer.y
-    const villager = this.add.image(worldX, worldY, 'villager_walk_1')
+    // Create villager inside container
+    const villager = this.add.image(x, y + TILE_HEIGHT, ASSETS.VILLAGERS.WALK_1)
     villager.setOrigin(0.5, 1)
-    villager.setScrollFactor(1, 1)
 
     // Scale villager to be smaller than buildings
     const villagerScale = (TILE_WIDTH / villager.width) * VILLAGER_SCALE_FACTOR
     villager.setScale(villagerScale)
 
-    // Use Y position as depth for proper isometric sorting
-    villager.setDepth(worldY)
+    // Initial depth based on grid position
+    // Add slightly more depth (+1.5) to appear in front of static objects on same tile
+    villager.setDepth(gridX + gridY + 1.5)
+    
+    this.objectsContainer.add(villager)
 
-    // Find initial target based on type (use world coordinates)
-    let targetX = worldX
-    let targetY = worldY
+    // Targets are in SCREEN coordinates relative to container
+    let targetX = x
+    let targetY = y + TILE_HEIGHT
     let targetGridX = gridX
     let targetGridY = gridY
 
@@ -677,8 +554,8 @@ export class GameScene extends Phaser.Scene {
       const forest = this.findNearestForest(gridX, gridY)
       if (forest) {
         const forestScreen = gridToScreen(forest.gridX + 0.5, forest.gridY + 0.5)
-        targetX = forestScreen.x + this.terrainContainer.x
-        targetY = forestScreen.y + TILE_HEIGHT + this.terrainContainer.y
+        targetX = forestScreen.x
+        targetY = forestScreen.y + TILE_HEIGHT
         targetGridX = forest.gridX
         targetGridY = forest.gridY
       }
@@ -687,8 +564,8 @@ export class GameScene extends Phaser.Scene {
       const randomGridX = gridX + Phaser.Math.Between(-5, 5)
       const randomGridY = gridY + Phaser.Math.Between(-5, 5)
       const wanderScreen = gridToScreen(randomGridX, randomGridY)
-      targetX = wanderScreen.x + this.terrainContainer.x
-      targetY = wanderScreen.y + TILE_HEIGHT + this.terrainContainer.y
+      targetX = wanderScreen.x
+      targetY = wanderScreen.y + TILE_HEIGHT
       targetGridX = randomGridX
       targetGridY = randomGridY
     }
@@ -701,8 +578,8 @@ export class GameScene extends Phaser.Scene {
       targetY,
       targetGridX,
       targetGridY,
-      homeX: worldX,
-      homeY: worldY,
+      homeX: x,
+      homeY: y + TILE_HEIGHT,
       speed: VILLAGER_SPEED,
       animFrame: 0,
       animTimer: 0,
@@ -744,7 +621,8 @@ export class GameScene extends Phaser.Scene {
         if (villager.animTimer > VILLAGER_ANIM_INTERVAL) {
           villager.animTimer = 0
           villager.animFrame = (villager.animFrame + 1) % 2
-          villager.sprite.setTexture(villager.animFrame === 0 ? 'villager_walk_1' : 'villager_walk_2')
+          const texture = villager.animFrame === 0 ? ASSETS.VILLAGERS.WALK_1 : ASSETS.VILLAGERS.WALK_2
+          villager.sprite.setTexture(texture)
         }
       }
 
@@ -798,19 +676,19 @@ export class GameScene extends Phaser.Scene {
                 // Deliver wood
                 this.woodCount += WOOD_PER_DELIVERY
                 villager.hasWood = false
-                if (this.woodText) {
-                  this.woodText.setText(`🪵 Dřevo: ${this.woodCount}`)
-                }
+                // Update UI via Manager
+                this.uiManager.updateWoodCount(this.woodCount)
                 console.log(`Wood delivered! Total: ${this.woodCount}`)
               }
 
               // Go to forest (use world coordinates)
-              const { gridX, gridY } = screenToGrid(villager.sprite.x - this.terrainContainer.x, villager.sprite.y - this.terrainContainer.y - TILE_HEIGHT)
+              // Coordinates are relative to container now
+              const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
               const forest = this.findNearestForest(gridX, gridY)
               if (forest) {
                 const forestScreen = gridToScreen(forest.gridX + 0.5, forest.gridY + 0.5)
-                villager.targetX = forestScreen.x + this.terrainContainer.x
-                villager.targetY = forestScreen.y + TILE_HEIGHT + this.terrainContainer.y
+                villager.targetX = forestScreen.x
+                villager.targetY = forestScreen.y + TILE_HEIGHT
                 villager.targetGridX = forest.gridX
                 villager.targetGridY = forest.gridY
               }
@@ -818,25 +696,30 @@ export class GameScene extends Phaser.Scene {
               // Arrived at forest - start working
               villager.state = 'working'
               villager.workTimer = 0
-              villager.sprite.setTexture('villager_walk_1') // Stop on frame 1
+              villager.sprite.setTexture(ASSETS.VILLAGERS.WALK_1) // Stop on frame 1
               console.log('Villager started cutting wood')
             }
           } else {
-            // Teepee villagers wander randomly (use world coordinates)
-            const { gridX, gridY } = screenToGrid(villager.sprite.x - this.terrainContainer.x, villager.sprite.y - this.terrainContainer.y - TILE_HEIGHT)
+            // Teepee villagers wander randomly
+            const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
             const randomGridX = gridX + Phaser.Math.Between(-10, 10)
             const randomGridY = gridY + Phaser.Math.Between(-10, 10)
             const wanderScreen = gridToScreen(randomGridX, randomGridY)
-            villager.targetX = wanderScreen.x + this.terrainContainer.x
-            villager.targetY = wanderScreen.y + TILE_HEIGHT + this.terrainContainer.y
+            villager.targetX = wanderScreen.x
+            villager.targetY = wanderScreen.y + TILE_HEIGHT
           }
         } else {
           // Move towards target
           villager.sprite.x += (dx / distance) * villager.speed
           villager.sprite.y += (dy / distance) * villager.speed
 
-          // Update depth based on Y position for proper isometric sorting
-          villager.sprite.setDepth(villager.sprite.y)
+          // Update depth based on new position
+          // We need to recalculate grid position for depth
+          // Use screenToGrid with local coordinates
+          const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
+          
+          // Depth = gridX + gridY + 1.5 (to be in front of objects on same tile)
+          villager.sprite.setDepth(gridX + gridY + 1.5)
         }
       }
     }
@@ -852,16 +735,16 @@ export class GameScene extends Phaser.Scene {
       // Convert to grid coordinates
       const { gridX, gridY } = screenToGrid(worldX, worldY)
 
-      // Position ghost building at grid location (use world coordinates)
+      // Position ghost building at grid location (relative to container)
       const size = this.placementBuildingType === 'house' ? 2 : 1
       const centerOffset = size === 2 ? 1.0 : 0.5
       const { x, y } = gridToScreen(gridX + centerOffset, gridY + centerOffset)
-      const ghostWorldX = x + this.terrainContainer.x
-      const ghostWorldY = y + TILE_HEIGHT + this.terrainContainer.y
-      this.ghostBuilding.setPosition(ghostWorldX, ghostWorldY)
+      
+      this.ghostBuilding.setPosition(x, y + TILE_HEIGHT)
 
-      // Update depth based on Y position for proper isometric sorting
-      this.ghostBuilding.setDepth(ghostWorldY)
+      // Update depth based on grid
+      // Add 2 to be above terrain and potentially above other objects temporarily
+      this.ghostBuilding.setDepth(gridX + gridY + 2)
 
       // Check if valid placement and tint accordingly
       const valid = this.isValidPlacement(gridX, gridY, size)
@@ -878,66 +761,25 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Camera movement with arrow keys or WASD (always enabled)
-    const camera = this.cameras.main
-
-    // Check if keyboard input is available
-    if (this.cursors && this.wasd) {
-      if (this.cursors.left.isDown || this.wasd.A.isDown) {
-        camera.scrollX -= CAMERA_SPEED
-      }
-      if (this.cursors.right.isDown || this.wasd.D.isDown) {
-        camera.scrollX += CAMERA_SPEED
-      }
-
-      if (this.cursors.up.isDown || this.wasd.W.isDown) {
-        camera.scrollY -= CAMERA_SPEED
-      }
-      if (this.cursors.down.isDown || this.wasd.S.isDown) {
-        camera.scrollY += CAMERA_SPEED
-      }
-    }
+    // Delegate input update to manager
+    this.inputManager.update()
 
     // Update villagers
     this.updateVillagers(this.game.loop.delta)
 
     // Update cut trees
     this.updateCutTrees(this.game.loop.delta)
+
+    // Force sort objects by depth
+    this.objectsContainer.sort('depth')
   }
 
   /**
    * Handle window resize
    */
   private handleResize(gameSize: Phaser.Structs.Size): void {
-    const width = gameSize.width
-    const height = gameSize.height
-
-    // Update camera viewport
-    this.cameras.main.setSize(width, height)
-
-    // Update UI positions to match new screen size
-    if (this.woodText) {
-      // Keep wood counter at top-left
-      this.woodText.setPosition(20, 20)
-    }
-
-    // Update building buttons at bottom
-    const menuY = height - 60
-    const firstButtonX = width / 2 - 60
-    const teepeeButtonX = width / 2 + 60
-
-    if (this.houseButtonBg) {
-      this.houseButtonBg.setPosition(firstButtonX, menuY)
-    }
-    if (this.houseButton) {
-      this.houseButton.setPosition(firstButtonX, menuY)
-    }
-    if (this.teepeeButtonBg) {
-      this.teepeeButtonBg.setPosition(teepeeButtonX, menuY)
-    }
-    if (this.teepeeButton) {
-      this.teepeeButton.setPosition(teepeeButtonX, menuY)
-    }
+    // Delegate UI resize to manager
+    this.uiManager.handleResize(gameSize.width, gameSize.height)
   }
 
   /**
