@@ -71,6 +71,12 @@ export const BUILDING_CONFIG = {
     centerOffset: 0.5,
     scaleFactor: 0.8,
     textureKey: 'teepee'
+  },
+  villager: {
+    size: 1,
+    centerOffset: 0.5,
+    scaleFactor: 0.4,
+    textureKey: 'villager_walk_1'
   }
 } as const
 
@@ -91,18 +97,29 @@ export const UI_CONFIG = {
     buttonBackground: 0x4a4a4a,
     hoverTint: 0xaaaaaa,
     textWhite: '#ffffff',
-    textBackground: '#2a2a2a'
+    textBackground: '#2a2a2a',
+    confirmGreen: 0x00aa00,
+    cancelRed: 0xaa0000,
+    emptyBuildingBg: 0x000000 // Dark background for empty indicator
   },
   alphas: {
     menuBackground: 0.9,
-    ghostBuilding: 0.6
+    ghostBuilding: 0.6,
+    emptyBuildingBg: 0.7
   },
   depths: {
     uiContainer: 10000,
     menuBackground: 10000,
     buttonBackground: 10001,
     buttonIcon: 10002,
-    text: 10003
+    text: 10003,
+    confirmModal: 10005,
+    emptyIndicator: 10004
+  },
+  emptyBuildingIndicator: {
+    size: 24,
+    yOffset: 40,
+    text: '?'
   }
 }
 
@@ -119,5 +136,8 @@ export const ASSETS = {
   TERRAIN: {
     TREE: 'tree',
     ROCKS: 'rocks'
+  },
+  UI: {
+    VILLAGER_ICON: 'villager_walk_1' // Reuse for now
   }
 }

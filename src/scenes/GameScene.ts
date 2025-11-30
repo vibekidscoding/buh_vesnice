@@ -36,6 +36,15 @@ export class GameScene extends Phaser.Scene {
   private rockMap: Map<string, Phaser.GameObjects.Image> = new Map() // Map "x,y" -> rock sprite
   private houses: Phaser.GameObjects.Image[] = []
   private teepees: Phaser.GameObjects.Image[] = []
+  
+  // Building data map: "gridX,gridY" -> Building Data
+  private buildingsMap: Map<string, { 
+    type: BuildingType, 
+    occupied: boolean, 
+    sprite: Phaser.GameObjects.Image,
+    emptyIndicator?: Phaser.GameObjects.Container 
+  }> = new Map()
+  
   private occupiedTiles: Set<string> = new Set() // Track occupied tiles (format: "x,y")
 
   // Cut tree tracking
@@ -270,20 +279,16 @@ export class GameScene extends Phaser.Scene {
     this.objectsContainer.add(object)
     targetArray.push(object)
     targetMap.set(`${data.gridX},${data.gridY}`, object)
-
-    // Debug: Add text showing depth
-    /*
-    const debugText = this.add.text(data.x, data.y, `${object.depth}`, { font: '10px monospace', color: '#fff' })
-    debugText.setOrigin(0.5, 0.5)
-    this.objectsContainer.add(debugText)
-    */
   }
 
   /**
    * Enter building placement mode
    */
-  private enterPlacementMode(buildingType: 'house' | 'teepee'): void {
+  private enterPlacementMode(buildingType: BuildingType): void {
     if (this.placementMode) return
+
+    // Close any existing confirmation modal
+    this.uiManager.hideConfirmation()
 
     this.placementMode = true
     this.placementBuildingType = buildingType
@@ -291,7 +296,14 @@ export class GameScene extends Phaser.Scene {
     console.log(`Placement mode activated: ${buildingType}`)
 
     // Determine asset key
-    const textureKey = buildingType === 'house' ? ASSETS.BUILDINGS.HOUSE : ASSETS.BUILDINGS.TEEPEE
+    let textureKey: string
+    if (buildingType === 'villager') {
+        textureKey = ASSETS.VILLAGERS.WALK_1
+    } else if (buildingType === 'house') {
+        textureKey = ASSETS.BUILDINGS.HOUSE
+    } else {
+        textureKey = ASSETS.BUILDINGS.TEEPEE
+    }
 
     // Create ghost building sprite
     this.ghostBuilding = this.add.image(0, 0, textureKey)
@@ -302,43 +314,44 @@ export class GameScene extends Phaser.Scene {
 
     // Scale based on building type
     if (buildingType === 'house') {
-      // Scale to fit 2x2 tiles (increased by 50% to cover area properly)
       const houseScale = ((TILE_WIDTH * 2) / this.ghostBuilding.width) * 1.5
       this.ghostBuilding.setScale(houseScale)
-    } else {
-      // Teepee is 1x1 (smaller multiplier for smaller building)
+    } else if (buildingType === 'teepee') {
       const teepeeScale = (TILE_WIDTH / this.ghostBuilding.width) * 0.8
       this.ghostBuilding.setScale(teepeeScale)
+    } else {
+        // Villager scale
+        const villagerScale = (TILE_WIDTH / this.ghostBuilding.width) * VILLAGER_SCALE_FACTOR
+        this.ghostBuilding.setScale(villagerScale)
     }
     this.ghostBuilding.setOrigin(0.5, 1)
 
-    // Create grid overlay
-    this.gridOverlay = this.add.graphics()
-    this.gridOverlay.lineStyle(1, 0xffffff, 0.2)
+    // Create grid overlay (only for buildings, optional for villagers)
+    if (!this.gridOverlay) {
+        this.gridOverlay = this.add.graphics()
+        this.gridOverlay.lineStyle(1, 0xffffff, 0.2)
 
-    // Draw isometric grid
-    for (let gridY = 0; gridY <= WORLD_HEIGHT; gridY++) {
-      for (let gridX = 0; gridX <= WORLD_WIDTH; gridX++) {
-        const { x, y } = gridToScreen(gridX, gridY)
+        // Draw isometric grid
+        for (let gridY = 0; gridY <= WORLD_HEIGHT; gridY++) {
+        for (let gridX = 0; gridX <= WORLD_WIDTH; gridX++) {
+            const { x, y } = gridToScreen(gridX, gridY)
 
-        // Draw vertical lines of the grid
-        if (gridX < WORLD_WIDTH) {
-          const nextRight = gridToScreen(gridX + 1, gridY)
-          this.gridOverlay.lineBetween(x, y, nextRight.x, nextRight.y)
+            // Draw vertical lines of the grid
+            if (gridX < WORLD_WIDTH) {
+            const nextRight = gridToScreen(gridX + 1, gridY)
+            this.gridOverlay.lineBetween(x, y, nextRight.x, nextRight.y)
+            }
+
+            // Draw horizontal lines of the grid
+            if (gridY < WORLD_HEIGHT) {
+            const nextDown = gridToScreen(gridX, gridY + 1)
+            this.gridOverlay.lineBetween(x, y, nextDown.x, nextDown.y)
+            }
         }
-
-        // Draw horizontal lines of the grid
-        if (gridY < WORLD_HEIGHT) {
-          const nextDown = gridToScreen(gridX, gridY + 1)
-          this.gridOverlay.lineBetween(x, y, nextDown.x, nextDown.y)
         }
-      }
+        this.gridOverlay.setDepth(999999) // Always on top of everything
+        this.terrainContainer.add(this.gridOverlay)
     }
-
-    // Overlay is on top of ground but below objects? No, overlay helps see grid.
-    // Let's put it in objectsContainer with high depth, OR in terrainContainer (above objects)
-    // Putting it in terrainContainer (after objectsContainer) ensures it's always on top
-    this.terrainContainer.add(this.gridOverlay)
 
     // Add placement click handler
     this.placementHandler = (pointer: Phaser.Input.Pointer) => {
@@ -370,12 +383,22 @@ export class GameScene extends Phaser.Scene {
       // Convert local coordinate to grid
       const { gridX, gridY } = screenToGrid(localX, localY)
 
+      // Check validity
       const size = this.placementBuildingType === 'house' ? 2 : 1
+      // Villagers are 1x1 for placement check logic
       if (this.isValidPlacement(gridX, gridY, size)) {
-        if (this.placementBuildingType === 'house') {
-          this.placeHouse(gridX, gridY)
+        
+        if (this.placementBuildingType === 'villager') {
+            // Direct villager placement
+            this.spawnVillager(gridX, gridY, 'teepee') // 'teepee' type just means wandering for now
+            this.exitPlacementMode()
         } else {
-          this.placeTeepee(gridX, gridY)
+            // Building placement
+            if (this.placementBuildingType === 'house') {
+                this.placeHouse(gridX, gridY)
+            } else {
+                this.placeTeepee(gridX, gridY)
+            }
         }
       }
     }
@@ -432,6 +455,7 @@ export class GameScene extends Phaser.Scene {
         }
 
         // Check occupied (trees, buildings)
+        // Villagers can walk on occupied tiles, but for now let's restrict spawning on top of trees/buildings
         if (this.occupiedTiles.has(`${checkX},${checkY}`)) {
           return false
         }
@@ -461,12 +485,29 @@ export class GameScene extends Phaser.Scene {
     house.setOrigin(0.5, 1)
     
     // Grid-based depth. House is 2x2.
-    // Center is at gridX+1, gridY+1.
-    // We want it to sort as if it's at the "front" of its footprint.
-    house.setDepth((gridX + 1) + (gridY + 1) + 1)
+    // house.setDepth((gridX + 1) + (gridY + 1) + 1)
+    // Switching to Y-based depth for correct visual overlap
+    house.setDepth(house.y)
+    
+    // Mark as unoccupied initially
+    // house.setTint(0x888888) // Removed tint
     
     this.objectsContainer.add(house)
     this.houses.push(house)
+    
+    // Create empty indicator
+    // Position slightly above the house
+    const indicatorY = house.y - (TILE_HEIGHT * 1.5) 
+    const emptyIndicator = this.uiManager.createEmptyBuildingIndicator(house.x, indicatorY, house.depth + 1)
+    this.objectsContainer.add(emptyIndicator)
+    
+    // Register building data
+    this.buildingsMap.set(`${gridX},${gridY}`, { 
+        type: 'house', 
+        occupied: false, 
+        sprite: house,
+        emptyIndicator: emptyIndicator // Store reference
+    })
 
     // Mark all 4 tiles as occupied
     for (let dy = 0; dy < 2; dy++) {
@@ -477,11 +518,25 @@ export class GameScene extends Phaser.Scene {
 
     console.log(`House placed at (${gridX}, ${gridY})`)
 
-    // Exit placement mode
+    // Exit placement mode immediately
     this.exitPlacementMode()
 
-    // Spawn villager at house
-    this.spawnVillager(gridX, gridY, 'house')
+    // Show Confirmation Modal for Villager Spawn
+    // We need world coordinates for the modal to appear near the house
+    // Convert container coords (x,y) to world coords
+    const worldX = x + this.terrainContainer.x
+    const worldY = y + this.terrainContainer.y - 50 // Above house
+
+    this.uiManager.showConfirmation(worldX, worldY, 
+        () => {
+            // Confirmed
+            this.spawnVillager(gridX, gridY, 'house')
+        },
+        () => {
+            // Cancelled
+            console.log('Villager spawn skipped')
+        }
+    )
   }
 
   /**
@@ -504,10 +559,28 @@ export class GameScene extends Phaser.Scene {
     teepee.setOrigin(0.5, 1)
     
     // Grid-based depth
-    teepee.setDepth(gridX + gridY + 1)
+    // teepee.setDepth(gridX + gridY + 1)
+    // Switching to Y-based depth
+    teepee.setDepth(teepee.y)
+    
+    // Mark as unoccupied initially
+    // teepee.setTint(0x888888) // Removed tint
     
     this.objectsContainer.add(teepee)
     this.teepees.push(teepee)
+    
+    // Create empty indicator
+    const indicatorY = teepee.y - TILE_HEIGHT
+    const emptyIndicator = this.uiManager.createEmptyBuildingIndicator(teepee.x, indicatorY, teepee.depth + 1)
+    this.objectsContainer.add(emptyIndicator)
+    
+    // Register building data
+    this.buildingsMap.set(`${gridX},${gridY}`, { 
+        type: 'teepee', 
+        occupied: false, 
+        sprite: teepee,
+        emptyIndicator: emptyIndicator
+    })
 
     // Mark tile as occupied
     this.occupiedTiles.add(`${gridX},${gridY}`)
@@ -517,8 +590,18 @@ export class GameScene extends Phaser.Scene {
     // Exit placement mode
     this.exitPlacementMode()
 
-    // Spawn villager at teepee
-    this.spawnVillager(gridX, gridY, 'teepee')
+    // Show Confirmation Modal for Villager Spawn
+    const worldX = x + this.terrainContainer.x
+    const worldY = y + this.terrainContainer.y - 30
+
+    this.uiManager.showConfirmation(worldX, worldY, 
+        () => {
+            this.spawnVillager(gridX, gridY, 'teepee')
+        },
+        () => {
+            console.log('Villager spawn skipped')
+        }
+    )
   }
 
   /**
@@ -537,9 +620,8 @@ export class GameScene extends Phaser.Scene {
     const villagerScale = (TILE_WIDTH / villager.width) * VILLAGER_SCALE_FACTOR
     villager.setScale(villagerScale)
 
-    // Initial depth based on grid position
-    // Add slightly more depth (+1.5) to appear in front of static objects on same tile
-    villager.setDepth(gridX + gridY + 1.5)
+    // Initial depth based on Y
+    villager.setDepth(villager.y)
     
     this.objectsContainer.add(villager)
 
@@ -548,6 +630,24 @@ export class GameScene extends Phaser.Scene {
     let targetY = y + TILE_HEIGHT
     let targetGridX = gridX
     let targetGridY = gridY
+
+    // Check if spawning at a building and mark it as occupied
+    const buildingKey = `${gridX},${gridY}`
+    const buildingData = this.buildingsMap.get(buildingKey)
+    // We need to cast to any because TypeScript doesn't know about the new 'emptyIndicator' property on the map value yet without updating the Map definition locally, 
+    // but simpler is just to access it. The map definition was actually updated in a previous step implicitly by usage, but let's be safe.
+    if (buildingData && (type === 'house' || type === 'teepee')) {
+        buildingData.occupied = true
+        // buildingData.sprite.clearTint() // No longer using tint
+        
+        // Remove empty indicator
+        if ((buildingData as any).emptyIndicator) {
+            this.uiManager.hideEmptyBuildingIndicator((buildingData as any).emptyIndicator)
+            ;(buildingData as any).emptyIndicator = undefined
+        }
+        
+        console.log(`Building at ${buildingKey} is now occupied`)
+    }
 
     if (type === 'house') {
       // Find nearest forest
@@ -713,15 +813,51 @@ export class GameScene extends Phaser.Scene {
           villager.sprite.x += (dx / distance) * villager.speed
           villager.sprite.y += (dy / distance) * villager.speed
 
-          // Update depth based on new position
-          // We need to recalculate grid position for depth
-          // Use screenToGrid with local coordinates
-          const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
-          
-          // Depth = gridX + gridY + 1.5 (to be in front of objects on same tile)
-          villager.sprite.setDepth(gridX + gridY + 1.5)
+          // Update depth to Y position
+          villager.sprite.setDepth(villager.sprite.y)
         }
       }
+      
+      // New Logic: Check for nearby empty buildings to move in
+      if (villager.state === 'walking' || villager.state === 'idle') {
+        this.checkNearbyBuildings(villager)
+      }
+    }
+  }
+
+  /**
+   * Check if villager is near an empty building and move in
+   */
+  private checkNearbyBuildings(villager: Villager): void {
+    // Only checking if not already assigned a specific task (like cutting wood)
+    // But currently 'walking' covers everything. We should ideally differentiate 'wandering' vs 'working_walk'
+    // For this prototype, let's just check proximity to ANY empty building
+    
+    // Calculate current grid position
+    const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
+    
+    // Check if we are AT an empty building
+    const key = `${gridX},${gridY}`
+    const building = this.buildingsMap.get(key)
+    
+    if (building && !building.occupied && (building.type === 'house' || building.type === 'teepee')) {
+        // Move in!
+        building.occupied = true
+        
+        // Update visual: remove indicator
+        if ((building as any).emptyIndicator) {
+            this.uiManager.hideEmptyBuildingIndicator((building as any).emptyIndicator)
+            ;(building as any).emptyIndicator = undefined
+        }
+        
+        // Remove villager from game (they went inside)
+        villager.sprite.destroy()
+        const index = this.villagers.indexOf(villager)
+        if (index > -1) {
+            this.villagers.splice(index, 1)
+        }
+        
+        console.log(`Villager moved into ${building.type} at ${key}`)
     }
   }
 
@@ -742,9 +878,8 @@ export class GameScene extends Phaser.Scene {
       
       this.ghostBuilding.setPosition(x, y + TILE_HEIGHT)
 
-      // Update depth based on grid
-      // Add 2 to be above terrain and potentially above other objects temporarily
-      this.ghostBuilding.setDepth(gridX + gridY + 2)
+      // Update depth to Y position
+      this.ghostBuilding.setDepth(this.ghostBuilding.y)
 
       // Check if valid placement and tint accordingly
       const valid = this.isValidPlacement(gridX, gridY, size)
