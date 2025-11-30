@@ -42,7 +42,9 @@ export class GameScene extends Phaser.Scene {
     type: BuildingType, 
     occupied: boolean, 
     sprite: Phaser.GameObjects.Image,
-    emptyIndicator?: Phaser.GameObjects.Container 
+    emptyIndicator?: Phaser.GameObjects.Container,
+    gridX: number,
+    gridY: number
   }> = new Map()
   
   private occupiedTiles: Set<string> = new Set() // Track occupied tiles (format: "x,y")
@@ -390,7 +392,7 @@ export class GameScene extends Phaser.Scene {
         
         if (this.placementBuildingType === 'villager') {
             // Direct villager placement
-            this.spawnVillager(gridX, gridY, 'teepee') // 'teepee' type just means wandering for now
+            this.spawnVillager(gridX, gridY, 'villager') // Use 'villager' type to trigger home-finding logic
             this.exitPlacementMode()
         } else {
             // Building placement
@@ -502,12 +504,21 @@ export class GameScene extends Phaser.Scene {
     this.objectsContainer.add(emptyIndicator)
     
     // Register building data
-    this.buildingsMap.set(`${gridX},${gridY}`, { 
-        type: 'house', 
+    // House is 2x2, so register for all 4 tiles
+    const buildingData = { 
+        type: 'house' as BuildingType, 
         occupied: false, 
         sprite: house,
-        emptyIndicator: emptyIndicator // Store reference
-    })
+        emptyIndicator: emptyIndicator, // Store reference
+        gridX: gridX,
+        gridY: gridY
+    }
+    
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        this.buildingsMap.set(`${gridX + dx},${gridY + dy}`, buildingData)
+      }
+    }
 
     // Mark all 4 tiles as occupied
     for (let dy = 0; dy < 2; dy++) {
@@ -579,7 +590,9 @@ export class GameScene extends Phaser.Scene {
         type: 'teepee', 
         occupied: false, 
         sprite: teepee,
-        emptyIndicator: emptyIndicator
+        emptyIndicator: emptyIndicator,
+        gridX: gridX,
+        gridY: gridY
     })
 
     // Mark tile as occupied
@@ -820,9 +833,44 @@ export class GameScene extends Phaser.Scene {
       
       // New Logic: Check for nearby empty buildings to move in
       if (villager.state === 'walking' || villager.state === 'idle') {
+        // If just wandering (not working), try to find a home
+        if (villager.type === 'villager' && !villager.assignedBuilding) { // Assuming manual villagers have type 'villager'
+             const emptyHome = this.findEmptyBuilding(villager.targetGridX, villager.targetGridY)
+             if (emptyHome) {
+                 // Set target to home
+                 const { x, y } = gridToScreen(emptyHome.gridX + 0.5, emptyHome.gridY + 0.5)
+                 // Target is local to container (because villager is in container)
+                 villager.targetX = x
+                 villager.targetY = y + TILE_HEIGHT
+                 // Don't change state, just let them walk there. 'checkNearbyBuildings' will handle the entry.
+             }
+        }
         this.checkNearbyBuildings(villager)
       }
     }
+  }
+
+  /**
+   * Find nearest empty building
+   */
+  private findEmptyBuilding(gridX: number, gridY: number): { gridX: number, gridY: number } | null {
+      let nearest: { gridX: number, gridY: number, dist: number } | null = null
+      
+      // Iterate through all buildings in map
+      // Note: buildingsMap contains entries for ALL tiles of a building. 
+      // We should be careful not to over-process, but for prototype this is fine.
+      for (const [key, building] of this.buildingsMap.entries()) {
+          if (!building.occupied && (building.type === 'house' || building.type === 'teepee')) {
+              const [bx, by] = key.split(',').map(Number)
+              const dist = Math.abs(bx - gridX) + Math.abs(by - gridY)
+              
+              if (!nearest || dist < nearest.dist) {
+                  nearest = { gridX: bx, gridY: by, dist }
+              }
+          }
+      }
+      
+      return nearest ? { gridX: nearest.gridX, gridY: nearest.gridY } : null
   }
 
   /**
@@ -836,28 +884,48 @@ export class GameScene extends Phaser.Scene {
     // Calculate current grid position
     const { gridX, gridY } = screenToGrid(villager.sprite.x, villager.sprite.y - TILE_HEIGHT)
     
-    // Check if we are AT an empty building
-    const key = `${gridX},${gridY}`
-    const building = this.buildingsMap.get(key)
+    // Check if we are AT an empty building (or very close)
+    // We iterate because sometimes exact gridX/Y might miss if they are between tiles
+    // Check 3x3 area around villager
+    let foundBuilding = null
+    let buildingKey = ''
+
+    for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            const key = `${gridX + dx},${gridY + dy}`
+            const building = this.buildingsMap.get(key)
+            if (building && !building.occupied && (building.type === 'house' || building.type === 'teepee')) {
+                foundBuilding = building
+                buildingKey = key
+                break
+            }
+        }
+        if (foundBuilding) break
+    }
     
-    if (building && !building.occupied && (building.type === 'house' || building.type === 'teepee')) {
+    if (foundBuilding) {
         // Move in!
-        building.occupied = true
+        foundBuilding.occupied = true
         
         // Update visual: remove indicator
-        if ((building as any).emptyIndicator) {
-            this.uiManager.hideEmptyBuildingIndicator((building as any).emptyIndicator)
-            ;(building as any).emptyIndicator = undefined
+        if ((foundBuilding as any).emptyIndicator) {
+            this.uiManager.hideEmptyBuildingIndicator((foundBuilding as any).emptyIndicator)
+            ;(foundBuilding as any).emptyIndicator = undefined
         }
         
-        // Remove villager from game (they went inside)
-        villager.sprite.destroy()
-        const index = this.villagers.indexOf(villager)
-        if (index > -1) {
-            this.villagers.splice(index, 1)
-        }
+        console.log(`Villager moved into ${foundBuilding.type} at ${buildingKey}`)
+
+        // Convert villager to the building's job type
+        villager.type = foundBuilding.type
+        // Set home location to this building (Local coordinates within container)
+        const { x, y } = gridToScreen(foundBuilding.gridX + 0.5, foundBuilding.gridY + 0.5)
+        villager.homeX = x 
+        villager.homeY = y + TILE_HEIGHT
         
-        console.log(`Villager moved into ${building.type} at ${key}`)
+        console.log(`Home set to local: ${villager.homeX}, ${villager.homeY} for grid ${foundBuilding.gridX},${foundBuilding.gridY}`)
+        
+        // Reset state to trigger job logic in next update
+        villager.state = 'walking' 
     }
   }
 
