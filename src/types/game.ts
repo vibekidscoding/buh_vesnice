@@ -50,3 +50,12 @@ export interface WorldPosition {
   worldX: number
   worldY: number
 }
+
+export interface Wolf {
+  sprite: Phaser.GameObjects.Image
+  state: 'idle' | 'roaming'
+  targetX: number
+  targetY: number
+  speed: number
+  roamTimer: number
+}

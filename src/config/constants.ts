@@ -43,6 +43,18 @@ export const TERRAIN_CONFIG = {
   noiseScale: 0.05        // Scale for noise generation (smaller = larger features)
 }
 
+// Time settings
+export const TIME_CONFIG = {
+  dayDuration: 60000, // 1 minute per full day cycle
+  // Time points (0.0 - 1.0)
+  dawn: 0.25,
+  noon: 0.5,
+  dusk: 0.75,
+  nightColor: 0x000022, // Deep blue
+  maxDarkness: 0.6, // Max alpha for darkness overlay (0.0 = transparent, 1.0 = pitch black)
+  uiSize: 50 // Size of the clock UI
+}
+
 // Game settings
 export const GAME_WIDTH = 1280
 export const GAME_HEIGHT = 720
@@ -114,7 +126,8 @@ export const UI_CONFIG = {
     buttonIcon: 10002,
     text: 10003,
     confirmModal: 10005,
-    emptyIndicator: 10004
+    emptyIndicator: 10004,
+    clock: 10004 // Clock UI depth
   },
   emptyBuildingIndicator: {
     size: 24,
@@ -131,7 +144,8 @@ export const ASSETS = {
   },
   VILLAGERS: {
     WALK_1: 'villager_walk_1',
-    WALK_2: 'villager_walk_2'
+    WALK_2: 'villager_walk_2',
+    WOLF: 'wolf' // New wolf asset key
   },
   TERRAIN: {
     TREE: 'tree',
@@ -139,5 +153,8 @@ export const ASSETS = {
   },
   UI: {
     VILLAGER_ICON: 'villager_walk_1' // Reuse for now
+  },
+  EFFECTS: {
+    LIGHT: 'light_glow' // Key for procedural texture
   }
 }

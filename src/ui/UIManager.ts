@@ -1,5 +1,5 @@
 import Phaser from 'phaser'
-import { UI_CONFIG, ASSETS } from '@/config/constants'
+import { UI_CONFIG, ASSETS, TIME_CONFIG } from '@/config/constants'
 import { BuildingType } from '@/types/game'
 
 export interface UIEvents {
@@ -21,6 +21,11 @@ export class UIManager {
   // Confirmation Modal
   private confirmContainer: Phaser.GameObjects.Container | null = null
   
+  // Clock UI
+  private clockContainer: Phaser.GameObjects.Container | null = null
+  private clockHand: Phaser.GameObjects.Line | null = null
+  private clockIcon: Phaser.GameObjects.Text | null = null
+
   // Container for all UI elements
   private container: Phaser.GameObjects.Container
 
@@ -35,6 +40,7 @@ export class UIManager {
   public create(): void {
     this.createResourceDisplay()
     this.createBuildingMenu()
+    this.createClock()
   }
 
   private createResourceDisplay(): void {
@@ -101,7 +107,6 @@ export class UIManager {
     container.setInteractive({ useHandCursor: true })
     
     container.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      console.log(`UI Button Clicked: ${type}`)
       pointer.event.stopPropagation()
       this.events.onBuildSelect(type)
     })
@@ -130,11 +135,7 @@ export class UIManager {
 
     this.confirmContainer = this.scene.add.container(x, y)
     this.confirmContainer.setDepth(UI_CONFIG.depths.confirmModal)
-    // Should move with camera if attached to world object, but here we use screen coordinates
-    // If x,y are passed as screen coordinates, we want ScrollFactor 0.
-    // But if they are passed as world coordinates (e.g. above house), we want ScrollFactor 1.
-    // Since we want it "near the house", let's assume World Coordinates are passed and set ScrollFactor 1.
-    this.confirmContainer.setScrollFactor(1) 
+    this.confirmContainer.setScrollFactor(1) // Moves with world camera
 
     // Background Panel
     const bg = this.scene.add.graphics()
@@ -188,6 +189,69 @@ export class UIManager {
     })
 
     return container
+  }
+
+  private createClock(): void {
+    const size = TIME_CONFIG.uiSize || 50 // Use TIME_CONFIG for size
+    const x = this.scene.cameras.main.width - size - 20
+    const y = size + 20
+
+    this.clockContainer = this.scene.add.container(x, y)
+    this.clockContainer.setScrollFactor(0, 0)
+    this.clockContainer.setDepth(UI_CONFIG.depths.clock)
+
+    // Clock Face
+    const bg = this.scene.add.graphics()
+    bg.fillStyle(0x333333, 0.8)
+    bg.fillCircle(0, 0, size / 2)
+    bg.lineStyle(2, 0xffffff, 1)
+    bg.strokeCircle(0, 0, size / 2)
+
+    // Sky representation (half blue, half black)
+    const sky = this.scene.add.graphics()
+    // Day half
+    sky.fillStyle(0x87CEEB, 1) // Sky Blue
+    sky.slice(0, 0, size/2 - 4, Phaser.Math.DegToRad(180), Phaser.Math.DegToRad(360), false)
+    sky.fillPath()
+    // Night half
+    sky.fillStyle(0x000033, 1) // Dark Blue
+    sky.slice(0, 0, size/2 - 4, Phaser.Math.DegToRad(0), Phaser.Math.DegToRad(180), false)
+    sky.fillPath()
+
+    // Hand
+    this.clockHand = this.scene.add.line(0, 0, 0, 0, 0, -size/2 + 5, 0xff0000, 1)
+    this.clockHand.setLineWidth(2)
+
+    // Sun/Moon Icon (Text for simplicity)
+    this.clockIcon = this.scene.add.text(0, 0, '☀️', { font: '20px Arial' })
+    this.clockIcon.setOrigin(0.5)
+
+    this.clockContainer.add([bg, sky, this.clockHand, this.clockIcon])
+    this.container.add(this.clockContainer)
+  }
+
+  public updateClock(progress: number): void {
+    if (this.clockHand && this.clockIcon) {
+        // Rotate hand: 0.0 is midnight (down), 0.5 is noon (up)
+        // Angle 0 is RIGHT in Phaser. We want 0.0 (Midnight) to be DOWN (90 deg)
+        // Progress 0 -> 90 deg
+        // Progress 0.25 (Dawn) -> 180 deg (Left) - Wait, typical clock? 
+        // Let's do: 0.0 (Midnight) -> Bottom, 0.5 (Noon) -> Top
+        
+        // Rotation angle (0 to 360 degrees based on progress)
+        // We want the hand to point to the current "sky" sector
+        // Let's say 0.5 (Noon) = -90 deg (Up)
+        // 0.0 (Midnight) = 90 deg (Down)
+        const angle = (progress * 360) + 90
+        this.clockHand.setAngle(angle)
+
+        // Update Icon
+        if (progress > 0.25 && progress < 0.75) {
+            this.clockIcon.setText('☀️')
+        } else {
+            this.clockIcon.setText('🌙')
+        }
+    }
   }
 
   /**
@@ -255,6 +319,14 @@ export class UIManager {
     if (this.villagerButtonContainer) {
         const vx = UI_CONFIG.firstButtonX + UI_CONFIG.buttonSpacing * 2
         this.villagerButtonContainer.setPosition(vx, menuY)
+    }
+
+    // Update Clock Position
+    if (this.clockContainer) {
+        const size = TIME_CONFIG.uiSize || 50
+        const x = width - size - 20
+        const y = size + 20
+        this.clockContainer.setPosition(x, y)
     }
   }
 }

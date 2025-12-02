@@ -14,13 +14,15 @@ import {
   WOOD_PER_DELIVERY,
   FOREST_TO_MEADOW_DELAY,
   TERRAIN_OBJECT_SCALES,
-  ASSETS
+  ASSETS,
+  TIME_CONFIG
 } from '@/config/constants'
 import { gridToScreen, screenToGrid } from '@/utils/isometric'
 import { NoiseGenerator } from '@/utils/noise'
 import type { Villager, CutTree, TerrainObjectData, BuildingType } from '@/types/game'
 import { InputManager } from '@/systems/InputManager'
 import { UIManager } from '@/ui/UIManager'
+import { TimeManager } from '@/systems/TimeManager'
 
 /**
  * GameScene
@@ -44,7 +46,8 @@ export class GameScene extends Phaser.Scene {
     sprite: Phaser.GameObjects.Image,
     emptyIndicator?: Phaser.GameObjects.Container,
     gridX: number,
-    gridY: number
+    gridY: number,
+    lights?: Phaser.GameObjects.Image[] // Changed to array for multiple lights
   }> = new Map()
   
   private occupiedTiles: Set<string> = new Set() // Track occupied tiles (format: "x,y")
@@ -62,6 +65,10 @@ export class GameScene extends Phaser.Scene {
   // Managers
   private inputManager!: InputManager
   private uiManager!: UIManager
+  private timeManager!: TimeManager
+
+  // Visuals
+  private darknessOverlay: Phaser.GameObjects.Rectangle | null = null
 
   // Building placement
   private placementMode = false
@@ -99,6 +106,21 @@ export class GameScene extends Phaser.Scene {
       }
     })
 
+    // Create procedural light texture
+    if (!this.textures.exists(ASSETS.EFFECTS.LIGHT)) {
+        const canvas = this.textures.createCanvas(ASSETS.EFFECTS.LIGHT, 128, 128)
+        if (canvas) {
+            const ctx = canvas.context
+            const grd = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
+            grd.addColorStop(0, 'rgba(255, 255, 200, 0.6)')
+            grd.addColorStop(0.4, 'rgba(255, 200, 100, 0.3)')
+            grd.addColorStop(1, 'rgba(255, 100, 0, 0)')
+            ctx.fillStyle = grd
+            ctx.fillRect(0, 0, 128, 128)
+            canvas.refresh()
+        }
+    }
+
     // Initialize noise generator
     this.noiseGenerator = new NoiseGenerator(Date.now())
 
@@ -114,6 +136,15 @@ export class GameScene extends Phaser.Scene {
       onBuildSelect: (type: BuildingType) => this.enterPlacementMode(type)
     })
     this.uiManager.create()
+    
+    this.timeManager = new TimeManager(this)
+
+    // Create darkness overlay (below UI but above world)
+    this.darknessOverlay = this.add.rectangle(0, 0, this.cameras.main.width, this.cameras.main.height, TIME_CONFIG.nightColor)
+    this.darknessOverlay.setScrollFactor(0)
+    this.darknessOverlay.setOrigin(0, 0)
+    this.darknessOverlay.setDepth(9000) // Below UI (10000)
+    this.darknessOverlay.setAlpha(0)
 
     // Listen for resize events
     this.scale.on('resize', this.handleResize, this)
@@ -273,10 +304,8 @@ export class GameScene extends Phaser.Scene {
     const scale = (TILE_WIDTH / object.width) * scaleFactor
     object.setScale(scale)
 
-    // Depth based on grid position (gridX + gridY)
-    // We use the data.gridX/Y directly for static objects for stability
-    // Adding 1 ensures it sits above the flat tile at the same grid coord
-    object.setDepth(data.gridX + data.gridY + 1)
+    // Depth based on Y-position for visual sorting
+    object.setDepth(object.y)
     
     this.objectsContainer.add(object)
     targetArray.push(object)
@@ -497,6 +526,22 @@ export class GameScene extends Phaser.Scene {
     this.objectsContainer.add(house)
     this.houses.push(house)
     
+    // Create Window Lights (Two small glows)
+    const lightLeft = this.add.image(house.x - 15, house.y - 25, ASSETS.EFFECTS.LIGHT)
+    lightLeft.setScale(0.8)
+    lightLeft.setAlpha(0)
+    lightLeft.setBlendMode(Phaser.BlendModes.ADD)
+    lightLeft.setDepth(house.depth + 0.1)
+    
+    const lightRight = this.add.image(house.x + 15, house.y - 15, ASSETS.EFFECTS.LIGHT)
+    lightRight.setScale(0.8)
+    lightRight.setAlpha(0)
+    lightRight.setBlendMode(Phaser.BlendModes.ADD)
+    lightRight.setDepth(house.depth + 0.1)
+
+    this.objectsContainer.add(lightLeft)
+    this.objectsContainer.add(lightRight)
+
     // Create empty indicator
     // Position slightly above the house
     const indicatorY = house.y - (TILE_HEIGHT * 1.5) 
@@ -511,7 +556,8 @@ export class GameScene extends Phaser.Scene {
         sprite: house,
         emptyIndicator: emptyIndicator, // Store reference
         gridX: gridX,
-        gridY: gridY
+        gridY: gridY,
+        lights: [lightLeft, lightRight]
     }
     
     for (let dy = 0; dy < 2; dy++) {
@@ -580,6 +626,15 @@ export class GameScene extends Phaser.Scene {
     this.objectsContainer.add(teepee)
     this.teepees.push(teepee)
     
+    // Create Light (Fire glow)
+    // Lower and smaller than before
+    const light = this.add.image(teepee.x, teepee.y - 5, ASSETS.EFFECTS.LIGHT)
+    light.setScale(1.0)
+    light.setAlpha(0)
+    light.setBlendMode(Phaser.BlendModes.ADD)
+    light.setDepth(teepee.depth + 0.1)
+    this.objectsContainer.add(light)
+
     // Create empty indicator
     const indicatorY = teepee.y - TILE_HEIGHT
     const emptyIndicator = this.uiManager.createEmptyBuildingIndicator(teepee.x, indicatorY, teepee.depth + 1)
@@ -592,7 +647,8 @@ export class GameScene extends Phaser.Scene {
         sprite: teepee,
         emptyIndicator: emptyIndicator,
         gridX: gridX,
-        gridY: gridY
+        gridY: gridY,
+        lights: [light]
     })
 
     // Mark tile as occupied
@@ -840,8 +896,10 @@ export class GameScene extends Phaser.Scene {
                  // Set target to home
                  const { x, y } = gridToScreen(emptyHome.gridX + 0.5, emptyHome.gridY + 0.5)
                  // Target is local to container (because villager is in container)
+                 // Adjust Y by TILE_HEIGHT so they walk to the "feet" position of the tile
                  villager.targetX = x
                  villager.targetY = y + TILE_HEIGHT
+                 
                  // Don't change state, just let them walk there. 'checkNearbyBuildings' will handle the entry.
              }
         }
@@ -967,6 +1025,14 @@ export class GameScene extends Phaser.Scene {
     // Delegate input update to manager
     this.inputManager.update()
 
+    // Update Time
+    this.timeManager.update(this.game.loop.delta)
+    if (this.darknessOverlay) {
+        this.darknessOverlay.setAlpha(this.timeManager.getDarknessLevel())
+    }
+    this.uiManager.updateClock(this.timeManager.getTime())
+    this.updateLights()
+
     // Update villagers
     this.updateVillagers(this.game.loop.delta)
 
@@ -978,11 +1044,33 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
+   * Update lights on buildings based on time of day
+   */
+  private updateLights(): void {
+    const intensity = this.timeManager.getLightIntensity()
+    
+    for (const building of this.buildingsMap.values()) {
+        if (building.lights) {
+            building.lights.forEach(light => {
+                light.setAlpha(intensity)
+                // Only show light if it's dark enough (alpha > 0)
+                light.setVisible(intensity > 0.01)
+            })
+        }
+    }
+  }
+
+  /**
    * Handle window resize
    */
   private handleResize(gameSize: Phaser.Structs.Size): void {
     // Delegate UI resize to manager
     this.uiManager.handleResize(gameSize.width, gameSize.height)
+    
+    // Resize darkness overlay
+    if (this.darknessOverlay) {
+        this.darknessOverlay.setSize(gameSize.width, gameSize.height)
+    }
   }
 
   /**
